@@ -1,0 +1,26 @@
+# https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/docker.md#docker-compose-example
+
+name: hermes-agent
+
+services:
+  hermes-agent:
+    container_name: hermes-agent
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hermes-agent-custom:${HERMES_AGENT_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - ${HERMES_DASHBOARD_HOST:+${HERMES_DASHBOARD_HOST}:}${HERMES_DASHBOARD_PORT:-9119}:${HERMES_DASHBOARD_PORT:-9119}
+      - ${API_SERVER_HOST:+${API_SERVER_HOST}:}${API_SERVER_PORT:-8642}:${API_SERVER_PORT:-8642}
+    command: gateway run
+    environment:
+      - HERMES_DASHBOARD=1
+      - API_SERVER_ENABLED=0
+    env_file:
+      - ./.env
+    volumes:
+      - hermes-data:/opt/data
+
+volumes:
+  hermes-data:
