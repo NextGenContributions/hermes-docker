@@ -13,7 +13,13 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-powerpoint#creating-from-scratch
     pptxgenjs@4.0.1
 
-RUN uv add --no-cache \
+RUN \
+    # Remove the .python-version file to avoid mismatch with the Python version used in 
+    # .venv folder, which could cause uv to download a different Python, thus breaking 
+    # the virtual environment.
+    rm /opt/hermes/.python-version && \
+    # Install additional packages to the existing .venv
+    uv add --no-cache --no-python-downloads \
     # General tools to extract text from various document formats
     # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-powerpoint#dependencies
     # https://github.com/microsoft/markitdown#optional-dependencies

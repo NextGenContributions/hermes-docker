@@ -8,5 +8,6 @@
         "nousresearch",
         "pymupdf",
         "searxng",
+        "venv"
     ]
 }
