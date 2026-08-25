@@ -1,8 +1,8 @@
 # v0.2.1
 FROM ghcr.io/julientant/blogwatcher-cli@sha256:e7a5d0cb2dcb94602ea89623236331219755bc4ff97ea4d3a9a7ae8a2ca7d36e AS blogwatcher-cli
 
-# v2026.7.7.2
-FROM nousresearch/hermes-agent@sha256:9c841866021c54c4596849f6135717e8a4d52ba510b7f52c50aef1de1a283973
+# v2026.8.19
+FROM nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install -g \
