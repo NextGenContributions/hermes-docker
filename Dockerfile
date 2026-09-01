@@ -34,3 +34,11 @@ RUN \
 # Monitor blogs and RSS/Atom feeds via blogwatcher-cli tool.
 # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/research/research-blogwatcher
 COPY --from=blogwatcher-cli /blogwatcher-cli /usr/local/bin/blogwatcher-cli
+
+# Wrap the original entrypoint to symlink persistent data targets before starting.
+# Keep the container starting as root here; the original Hermes entrypoint handles
+# its own privilege drop to the hermes user. This lets us create and chown the
+# persistent-data directories before the agent starts.
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

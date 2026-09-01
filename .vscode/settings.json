@@ -6,6 +6,8 @@
         "markitdown",
         "metasearch",
         "nousresearch",
+        "PGID",
+        "PUID",
         "pymupdf",
         "searxng",
         "venv"
