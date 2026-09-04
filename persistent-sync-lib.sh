@@ -217,6 +217,19 @@ rclone_run_sync() {
     # We intentionally do NOT use --checksum because computing hashes over many
     # small files on EFS/NFS is slow and expensive; rclone defaults to comparing
     # size and modification time, which is much cheaper.
+    local transfers="${RCLONE_TRANSFERS:-32}"
+    local checkers="${RCLONE_CHECKERS:-64}"
+
+    # Validate numeric values, falling back to defaults on bad input.
+    if ! [[ "$transfers" =~ ^[0-9]+$ ]] || [[ "$transfers" -lt 1 ]]; then
+        log "Warning: invalid RCLONE_TRANSFERS value '$transfers', using default 32"
+        transfers=32
+    fi
+    if ! [[ "$checkers" =~ ^[0-9]+$ ]] || [[ "$checkers" -lt 1 ]]; then
+        log "Warning: invalid RCLONE_CHECKERS value '$checkers', using default 64"
+        checkers=64
+    fi
+
     local rclone_cmd=(rclone)
     if [[ "$is_dir" -eq 1 ]]; then
         rclone_cmd+=(sync "$src" "$dest")
@@ -225,6 +238,8 @@ rclone_run_sync() {
     fi
 
     if "${rclone_cmd[@]}" \
+        --transfers "$transfers" \
+        --checkers "$checkers" \
         --stats-one-line \
         --stats 0 \
         --log-level INFO; then
