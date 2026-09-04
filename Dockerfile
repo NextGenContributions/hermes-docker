@@ -35,10 +35,30 @@ RUN \
 # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/research/research-blogwatcher
 COPY --from=blogwatcher-cli /blogwatcher-cli /usr/local/bin/blogwatcher-cli
 
-# Wrap the original entrypoint to symlink persistent data targets before starting.
+# Install rclone for syncing important persistent data between the container's
+# fast local disk and the remote/network-backed persistent volume.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends rclone && \
+    rm -rf /var/lib/apt/lists/*
+
+# Wrap the original entrypoint to manage rclone sync before/after Hermes runs.
 # Keep the container starting as root here; the original Hermes entrypoint handles
 # its own privilege drop to the hermes user. This lets us create and chown the
 # persistent-data directories before the agent starts.
+COPY persistent-sync-lib.sh /usr/local/bin/persistent-sync-lib.sh
+COPY persistent-sync.sh /usr/local/bin/persistent-sync.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod +x \
+    /usr/local/bin/persistent-sync-lib.sh \
+    /usr/local/bin/persistent-sync.sh \
+    /usr/local/bin/entrypoint.sh
+
+# Register the persistent-sync service with the base image's s6-overlay setup.
+# The service periodically uploads local targets to the persistent volume and
+# performs a final upload when the container shuts down.
+COPY s6-overlay/s6-rc.d /etc/s6-overlay/s6-rc.d
+RUN chmod +x \
+    /etc/s6-overlay/s6-rc.d/persistent-sync/run \
+    /etc/s6-overlay/s6-rc.d/persistent-sync/finish
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

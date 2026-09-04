@@ -1,0 +1,4 @@
+#!/command/with-contenv sh
+# s6 service: periodically sync local persistent targets back to the remote
+# persistent volume. The finish script runs one final sync on shutdown.
+exec /usr/local/bin/persistent-sync.sh loop
