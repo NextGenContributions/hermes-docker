@@ -47,7 +47,7 @@ To reduce that cost, this image uses [`rclone`](https://rclone.org/) inside a cu
    - The same targets are synced for each profile in `ADDITIONAL_PROFILES` to `/opt/data/profiles/<profile>`.
 4. The original Hermes entrypoint `/opt/hermes/docker/entrypoint-dispatch.sh` is started. Persistent files now live on local disk, so Hermes's runtime I/O is local.
 5. A background service schedules each target independently and syncs it from `/opt/data` back to `persistent:` when its own interval elapses. Targets without a custom interval use `PERSISTENT_DATA_SYNC_FREQ`.
-6. When the container receives `SIGTERM`, the background service stops and one final sync to `persistent:` runs before exit.
+6. When the container receives `SIGTERM`, the background service stops and one final sync to `persistent:` runs before exit. The service has unlimited finish timeout and `docker-compose.yml` uses a longer `stop_grace_period` so the final upload is not killed before it completes.
 7. Checksum/hash comparisons are not used because they are expensive over network storage such as EFS; rclone compares by size and modification time instead.
 
 ### Example

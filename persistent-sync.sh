@@ -49,11 +49,16 @@ main() {
                     fi
                 done
 
-                # Sleep until the next target is due. SIGTERM will interrupt sleep.
+                # Sleep until the next target is due. Run sleep in the background
+                # and wait for it; bash's wait is interrupted immediately by
+                # SIGTERM, so shutdown is fast even when the next sync is far away.
                 if [[ "$nearest_time" -gt "$now" ]]; then
                     local sleep_seconds=$((nearest_time - now))
                     log "Sleeping ${sleep_seconds}s until target '$nearest_target' is due"
-                    sleep "$sleep_seconds"
+                    local sleep_pid
+                    sleep "$sleep_seconds" &
+                    sleep_pid=$!
+                    wait "$sleep_pid"
                     now=$(date +%s)
                 fi
 
