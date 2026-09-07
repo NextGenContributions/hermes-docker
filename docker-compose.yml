@@ -24,7 +24,7 @@ services:
     env_file:
       - ./.env
     volumes:
-      - hermes-data:/opt/efs
+      - hermes-data:/opt/data/efs
 
 volumes:
   hermes-data:

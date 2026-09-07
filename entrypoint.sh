@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # entrypoint.sh
-# Wraps the Hermes agent entrypoint and uses rclone to keep only the important
-# persistent files/folders on a remote/network volume, while Hermes runs with
-# those files cached on the container's fast local disk.
+# Wraps the Hermes agent entrypoint and uses rclone and/or symlinks to keep
+# important persistent files/folders on a remote/network volume. Synced targets
+# are cached on the container's fast local disk, while linked targets are read
+# and written directly on the persistent volume.
 #
 # Flow:
-#   1. Configure an rclone alias remote pointing to $PERSISTENT_DATA_HOME.
-#   2. Sync $PERSISTENT_TARGETS_SYNC from remote -> /opt/data (and profiles).
-#   3. Hand over to the original Hermes entrypoint as PID 1.
-#   4. The s6-overlay persistent-sync service handles periodic local -> remote
+#   1. Symlink $PERSISTENT_TARGETS_LINK directly from $PERSISTENT_DATA_HOME
+#      into /opt/data (and profiles).
+#   2. Configure an rclone alias remote pointing to $PERSISTENT_DATA_HOME.
+#   3. Sync $PERSISTENT_TARGETS_SYNC from remote -> /opt/data (and profiles).
+#   4. Hand over to the original Hermes entrypoint as PID 1.
+#   5. The s6-overlay persistent-sync service handles periodic local -> remote
 #      syncs and a final sync on container shutdown.
 set -euo pipefail
 
@@ -20,17 +23,23 @@ source /usr/local/bin/persistent-sync-lib.sh
 main() {
     log "Hermes persistent-data wrapper starting"
 
-    # The sync wrapper is optional only when the required env vars are missing;
-    # in that case fall through to the original entrypoint unchanged.
-    if [[ -z "${PERSISTENT_DATA_HOME:-}" || -z "${PERSISTENT_TARGETS_SYNC:-}" ]]; then
-        log "PERSISTENT_DATA_HOME and/or PERSISTENT_TARGETS_SYNC not set; running original entrypoint without sync"
+    # The wrapper is optional when no persistent targets are configured; in that
+    # case fall through to the original entrypoint unchanged.
+    if [[ -z "${PERSISTENT_DATA_HOME:-}" ]]; then
+        log "PERSISTENT_DATA_HOME is not set; running original entrypoint without sync/link"
+        exec "$ORIGINAL_ENTRYPOINT" "$@"
+    fi
+
+    if [[ -z "${PERSISTENT_TARGETS_SYNC:-}" && -z "${PERSISTENT_TARGETS_LINK:-}" ]]; then
+        log "No persistent targets configured; running original entrypoint without sync/link"
         exec "$ORIGINAL_ENTRYPOINT" "$@"
     fi
 
     log "PERSISTENT_DATA_HOME=$PERSISTENT_DATA_HOME"
-    log "PERSISTENT_TARGETS_SYNC=$PERSISTENT_TARGETS_SYNC"
+    log "PERSISTENT_TARGETS_SYNC=${PERSISTENT_TARGETS_SYNC:-<none>}"
+    log "PERSISTENT_TARGETS_LINK=${PERSISTENT_TARGETS_LINK:-<none>}"
     log "ADDITIONAL_PROFILES=${ADDITIONAL_PROFILES:-<none>}"
-    log "PERSISTENT_DATA_SYNC_FREQ=${PERSISTENT_DATA_SYNC_FREQ:-3600}"
+    log "PERSISTENT_TARGETS_SYNC_FREQ=${PERSISTENT_TARGETS_SYNC_FREQ:-3600}"
 
     # This wrapper must run as root so it can configure rclone, create dirs,
     # and chown data before the original Hermes entrypoint drops privileges.
@@ -41,20 +50,42 @@ main() {
     ensure_dir_owned "$PERSISTENT_DATA_HOME"
     ensure_dir_owned "/opt/data"
 
-    setup_rclone_remote || {
-        # If rclone cannot be configured, start Hermes anyway rather than
-        # blocking the container entirely.
-        log "Rclone setup failed, continuing without persistent sync"
-        exec "$ORIGINAL_ENTRYPOINT" "$@"
-    }
+    # Set up rclone only when sync targets are requested.
+    local has_sync=0
+    if [[ -n "${PERSISTENT_TARGETS_SYNC:-}" ]]; then
+        if setup_rclone_remote; then
+            has_sync=1
+        else
+            log "Rclone setup failed; sync targets will be ignored"
+            has_sync=0
+        fi
+    fi
 
-    # Parse targets with their per-target sync frequencies before syncing.
     local default_freq
-    default_freq=$(parse_sync_interval "${PERSISTENT_DATA_SYNC_FREQ:-3600}")
-    load_targets "$PERSISTENT_TARGETS_SYNC" "$default_freq"
+    default_freq=$(parse_sync_interval "${PERSISTENT_TARGETS_SYNC_FREQ:-3600}")
 
-    # Copy persistent data from network storage to local disk before Hermes starts.
-    sync_all_from_remote
+    # Parse link targets first; if a target is configured for both sync and
+    # link, the link takes precedence.
+    if [[ -n "${PERSISTENT_TARGETS_LINK:-}" ]]; then
+        load_link_targets "$PERSISTENT_TARGETS_LINK"
+    fi
+
+    if [[ "$has_sync" -eq 1 ]]; then
+        load_sync_targets "$PERSISTENT_TARGETS_SYNC" "$default_freq"
+    fi
+
+    dedupe_sync_and_link_targets
+
+    # Create symlinks for any targets that should be wired directly into the
+    # persistent volume.
+    if [[ ${#LINK_TARGET_LIST[@]} -gt 0 ]]; then
+        link_all_targets
+    fi
+
+    # Copy remaining sync targets from the persistent volume to local disk.
+    if [[ ${#SYNC_TARGET_LIST[@]} -gt 0 ]]; then
+        sync_all_from_remote
+    fi
 
     # Exec the original entrypoint so it becomes PID 1 and s6-overlay can run
     # its full supervision tree (including the persistent-sync service).

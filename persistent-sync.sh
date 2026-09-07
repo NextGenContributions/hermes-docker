@@ -16,8 +16,8 @@ do_setup() {
     setup_rclone_remote || return 1
 
     local default_freq
-    default_freq=$(parse_sync_interval "${PERSISTENT_DATA_SYNC_FREQ:-3600}")
-    load_targets "$PERSISTENT_TARGETS_SYNC" "$default_freq"
+    default_freq=$(parse_sync_interval "${PERSISTENT_TARGETS_SYNC_FREQ:-3600}")
+    load_sync_targets "$PERSISTENT_TARGETS_SYNC" "$default_freq"
 }
 
 run_loop() {
@@ -27,12 +27,22 @@ run_loop() {
     # interrupts the background sleep via wait, so shutdown is immediate.
     trap 'log "Received SIGTERM, exiting periodic sync loop"; exit 0' TERM
 
+    # Nothing to do when only symlink targets are configured, but keep the
+    # s6 longrun service alive so s6-overlay does not restart us continuously.
+    if [[ ${#SYNC_TARGET_LIST[@]} -eq 0 ]]; then
+        log "No sync targets configured; persistent-sync service idle"
+        while true; do
+            sleep 86400 &
+            wait $!
+        done
+    fi
+
     # Track the next scheduled sync time for each target.
     declare -A next_sync
     local now
     now=$(date +%s)
-    for target in "${TARGET_LIST[@]}"; do
-        next_sync["$target"]=$((now + TARGET_FREQS["$target"]))
+    for target in "${SYNC_TARGET_LIST[@]}"; do
+        next_sync["$target"]=$((now + SYNC_TARGET_FREQS["$target"]))
     done
 
     while true; do
@@ -41,7 +51,7 @@ run_loop() {
         # Find the nearest target that is due to sync.
         local nearest_target=""
         local nearest_time=""
-        for target in "${TARGET_LIST[@]}"; do
+        for target in "${SYNC_TARGET_LIST[@]}"; do
             local t="${next_sync["$target"]}"
             if [[ -z "$nearest_time" || "$t" -lt "$nearest_time" ]]; then
                 nearest_time="$t"
@@ -63,11 +73,11 @@ run_loop() {
         fi
 
         # Sync every target whose deadline has passed (handles ties).
-        for target in "${TARGET_LIST[@]}"; do
+        for target in "${SYNC_TARGET_LIST[@]}"; do
             if [[ "${next_sync["$target"]}" -le "$now" ]]; then
                 log "Target '$target' is due for sync to remote"
                 sync_target_to_remote "$target"
-                next_sync["$target"]=$((now + TARGET_FREQS["$target"]))
+                next_sync["$target"]=$((now + SYNC_TARGET_FREQS["$target"]))
             fi
         done
     done

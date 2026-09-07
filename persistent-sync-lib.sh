@@ -19,11 +19,11 @@ HERMES_USER="hermes"
 TARGET_UID=""
 TARGET_GID=""
 
-# Parsed target list and per-target sync frequencies. Populated by load_targets.
-# TARGET_LIST is an indexed array of target names; TARGET_FREQS is an associative
+# Parsed target list and per-target sync frequencies. Populated by load_sync_targets.
+# SYNC_TARGET_LIST is an indexed array of target names; SYNC_TARGET_FREQS is an associative
 # array mapping each target to its sync interval in seconds.
-declare -a TARGET_LIST
-declare -A TARGET_FREQS
+declare -a SYNC_TARGET_LIST
+declare -A SYNC_TARGET_FREQS
 
 # Allow callers to override the log prefix (entrypoint vs. s6 service).
 LOG_PREFIX="${LOG_PREFIX:-[persistent-sync]}"
@@ -119,7 +119,7 @@ EOF
     export RCLONE_CONFIG="$RCLONE_CONFIG_FILE"
 }
 
-# Parse PERSISTENT_DATA_SYNC_FREQ into seconds. Supports plain seconds or a
+# Parse PERSISTENT_TARGETS_SYNC_FREQ into seconds. Supports plain seconds or a
 # suffix of s, m, h, d. Defaults to 3600 seconds (1 hour).
 parse_sync_interval() {
     local value="${1:-3600}"
@@ -139,19 +139,19 @@ parse_sync_interval() {
     fi
 }
 
-# Parse the PERSISTENT_TARGETS_SYNC string into TARGET_LIST and TARGET_FREQS.
+# Parse the PERSISTENT_TARGETS_SYNC string into SYNC_TARGET_LIST and SYNC_TARGET_FREQS.
 # Each item can be either:
 #   - "target"                     -> uses default_freq
 #   - "(target| freq)"             -> uses the per-target freq
 # The pipe separator keeps tuple parsing simple because entries themselves are
 # separated by commas. Frequencies accept the same suffixes as parse_sync_interval
 # (s/m/h/d).
-load_targets() {
+load_sync_targets() {
     local targets="$1"
     local default_freq="$2"
 
-    TARGET_LIST=()
-    TARGET_FREQS=()
+    SYNC_TARGET_LIST=()
+    SYNC_TARGET_FREQS=()
 
     [[ -z "$targets" ]] && return 0
 
@@ -189,8 +189,8 @@ load_targets() {
         [[ -z "$target" ]] && continue
 
         freq=$(parse_sync_interval "$freq")
-        TARGET_LIST+=("$target")
-        TARGET_FREQS["$target"]="$freq"
+        SYNC_TARGET_LIST+=("$target")
+        SYNC_TARGET_FREQS["$target"]="$freq"
         log "Configured target '$target' with sync interval ${freq}s"
     done
 }
@@ -342,7 +342,7 @@ sync_target() {
     fi
 }
 
-# (Kept for compatibility; new code uses TARGET_LIST directly.)
+# (Kept for compatibility; new code uses SYNC_TARGET_LIST directly.)
 sync_all_targets() {
     local src_base="$1"
     local dest_base="$2"
@@ -419,7 +419,7 @@ sync_target_to_remote() {
 # Initial download: remote -> local.
 sync_all_from_remote() {
     log "Starting initial sync: remote -> local"
-    for target in "${TARGET_LIST[@]}"; do
+    for target in "${SYNC_TARGET_LIST[@]}"; do
         log "Syncing target '$target' from persistent: to /opt/data"
         sync_target_from_remote "$target"
     done
@@ -429,9 +429,173 @@ sync_all_from_remote() {
 # Periodic/final upload: local -> remote.
 sync_all_to_remote() {
     log "Starting sync: local -> remote"
-    for target in "${TARGET_LIST[@]}"; do
+    for target in "${SYNC_TARGET_LIST[@]}"; do
         log "Syncing target '$target' from /opt/data to persistent:"
         sync_target_to_remote "$target"
     done
     log "Sync to remote finished"
+}
+
+
+########################################################################################
+
+
+# Parsed list of targets that should be symlinked directly to the persistent
+# volume instead of copied via rclone. Populated by load_link_targets().
+declare -a LINK_TARGET_LIST
+
+# Parse a simple comma-separated list of targets for symlinking. Trailing
+# slashes are preserved so callers can detect directory targets.
+load_link_targets() {
+    local targets="$1"
+
+    LINK_TARGET_LIST=()
+
+    [[ -z "$targets" ]] && return 0
+
+    local IFS=','
+    local raw_list
+    read -ra raw_list <<< "$targets"
+
+    for raw_target in "${raw_list[@]}"; do
+        local target
+        target=$(printf '%s' "$raw_target" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        [[ -z "$target" ]] && continue
+
+        LINK_TARGET_LIST+=("$target")
+        log "Configured link target '$target'"
+    done
+}
+
+# Create a symlink at $dest pointing to $src.
+# - Creates the parent directory of $dest if needed and makes sure it is owned
+#   by the target user so the Hermes runtime can write other files there.
+# - If $dest is already a symlink, removes it first so we can update the link.
+# - If $dest exists as a real file or directory, we warn and skip to avoid
+#   accidentally overwriting data that may already be inside the container.
+ensure_symlink() {
+    local src="$1"
+    local dest="$2"
+
+    mkdir -p "$(dirname "$dest")"
+    chown_target "$(dirname "$dest")"
+
+    if [[ -L "$dest" ]]; then
+        rm "$dest"
+    elif [[ -e "$dest" ]]; then
+        log "Warning: destination exists and is not a symlink: $dest"
+        return 1
+    fi
+
+    # If the source file does not exist yet, create an empty placeholder on the
+    # persistent volume. This avoids dangling symlinks and ensures the runtime
+    # user can write the real file through the symlink later.
+    if [[ ! -e "$src" && ! -L "$src" ]]; then
+        touch "$src"
+        chown_target "$src"
+    fi
+
+    ln -s "$src" "$dest"
+    chown_target "$dest"
+}
+
+# Symlink a single target from $source_base to $dest_base.
+# Directory targets use ensure_dir_owned on the source side; file targets only
+# ensure their parent directory exists.
+setup_persistent_links() {
+    local source_base="$1"
+    local dest_base="$2"
+    local target="$3"
+
+    # A trailing slash in the target name means we should treat it as a
+    # directory and link its contents, not a single file.
+    local is_dir=0
+    [[ "$target" == */ ]] && is_dir=1
+    local target_name="${target%/}"
+
+    local src="${source_base%/}/${target_name}"
+    local dest="${dest_base%/}/${target_name}"
+
+    # Ensure the source root exists and is writable by the runtime user.
+    if [[ ! -e "$source_base" ]]; then
+        mkdir -p "$source_base"
+    fi
+    chown_target "$source_base"
+
+    if [[ "$is_dir" -eq 1 ]]; then
+        # Ensure the source directory exists on the persistent volume and is
+        # owned by the runtime user, then link it into the container.
+        ensure_dir_owned "$src"
+        chown_target "$src" 1
+        ensure_symlink "$src" "$dest" || return 0
+    else
+        # Ensure the source file's parent directory exists and is writable by
+        # the runtime user. The file itself will be created by the application
+        # later if it does not exist yet.
+        ensure_dir_owned "$(dirname "$src")"
+        if [[ -e "$src" ]]; then
+            chown_target "$src"
+        fi
+        ensure_symlink "$src" "$dest" || return 0
+    fi
+}
+
+# Symlink one target for the default profile and all configured profiles.
+link_target_all_profiles() {
+    local target="$1"
+
+    setup_persistent_links "$PERSISTENT_DATA_HOME" "/opt/data" "$target"
+
+    if [[ -n "${ADDITIONAL_PROFILES:-}" ]]; then
+        ensure_dir_owned "${PERSISTENT_DATA_HOME}/profiles"
+        ensure_dir_owned "/opt/data/profiles"
+
+        local IFS=','
+        local profile_list
+        read -ra profile_list <<< "$ADDITIONAL_PROFILES"
+
+        for raw_profile in "${profile_list[@]}"; do
+            local profile
+            profile=$(printf '%s' "$raw_profile" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            [[ -z "$profile" ]] && continue
+            setup_persistent_links \
+                "${PERSISTENT_DATA_HOME}/profiles/${profile}" \
+                "/opt/data/profiles/${profile}" \
+                "$target"
+        done
+    fi
+}
+
+# Set up symlinks for all targets configured in PERSISTENT_TARGETS_LINK.
+link_all_targets() {
+    log "Setting up persistent symlinks"
+    for target in "${LINK_TARGET_LIST[@]}"; do
+        log "Linking target '$target' into /opt/data from $PERSISTENT_DATA_HOME"
+        link_target_all_profiles "$target"
+    done
+    log "Persistent symlinks finished"
+}
+
+# If a target appears in both the sync and link lists, prefer the link and
+# remove it from the sync list. This avoids rclone writing through a symlink.
+dedupe_sync_and_link_targets() {
+    if [[ ${#LINK_TARGET_LIST[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    local deduped=()
+    for sync_target in "${SYNC_TARGET_LIST[@]}"; do
+        local found=0
+        for link_target in "${LINK_TARGET_LIST[@]}"; do
+            if [[ "$sync_target" == "$link_target" ]]; then
+                log "Target '$sync_target' is configured for both sync and link; using link only"
+                found=1
+                break
+            fi
+        done
+        if [[ "$found" -eq 0 ]]; then
+            deduped+=("$sync_target")
+        fi
+    done
+    SYNC_TARGET_LIST=("${deduped[@]}")
 }
