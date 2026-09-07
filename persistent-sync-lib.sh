@@ -139,7 +139,7 @@ parse_sync_interval() {
     fi
 }
 
-# Parse the PERSISTENT_TARGETS string into TARGET_LIST and TARGET_FREQS.
+# Parse the PERSISTENT_TARGETS_SYNC string into TARGET_LIST and TARGET_FREQS.
 # Each item can be either:
 #   - "target"                     -> uses default_freq
 #   - "(target| freq)"             -> uses the per-target freq

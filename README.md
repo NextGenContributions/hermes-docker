@@ -24,7 +24,7 @@ To reduce that cost, this image uses [`rclone`](https://rclone.org/) inside a cu
 | Variable | Required | Description |
 | --- | --- | --- |
 | `PERSISTENT_DATA_HOME` | Yes | Root directory on the host (or network volume) where persistent data lives, e.g. `/efs/hermes-data`. |
-| `PERSISTENT_TARGETS` | Yes | Comma-separated list of files and/or folders inside `/opt/data` that should be kept in `$PERSISTENT_DATA_HOME`. Append `/` to a name to treat it as a directory. Entries may also specify a custom sync interval using the format `(target \| freq)`, e.g. `(wiki/ \| 60)`. `freq` follows the same format as `PERSISTENT_DATA_SYNC_FREQ` and overrides the default for that target. Spaces around the target, `\|`, and frequency are allowed. |
+| `PERSISTENT_TARGETS_SYNC` | Yes | Comma-separated list of files and/or folders inside `/opt/data` that should be kept in `$PERSISTENT_DATA_HOME`. Append `/` to a name to treat it as a directory. Entries may also specify a custom sync interval using the format `(target \| freq)`, e.g. `(wiki/ \| 60)`. `freq` follows the same format as `PERSISTENT_DATA_SYNC_FREQ` and overrides the default for that target. Spaces around the target, `\|`, and frequency are allowed. |
 | `ADDITIONAL_PROFILES` | No | Comma-separated list of extra Hermes profile names. For each profile `<name>`, targets are also synced between `$PERSISTENT_DATA_HOME/profiles/<name>` and `/opt/data/profiles/<name>`. |
 | `PERSISTENT_DATA_SYNC_FREQ` | No | Default interval between background syncs from local disk back to `$PERSISTENT_DATA_HOME`. Plain seconds or a suffix of `s`, `m`, `h`, `d`. Defaults to `3600` (1 hour). |
 | `RCLONE_TRANSFERS` | No | Number of file transfers to run in parallel. Passed to rclone as `--transfers`. Defaults to `32`. |
@@ -39,7 +39,7 @@ To reduce that cost, this image uses [`rclone`](https://rclone.org/) inside a cu
 
 ### How it works
 
-1. The entrypoint reads `PERSISTENT_DATA_HOME`, `PERSISTENT_TARGETS`, and `PERSISTENT_DATA_SYNC_FREQ`.
+1. The entrypoint reads `PERSISTENT_DATA_HOME`, `PERSISTENT_TARGETS_SYNC`, and `PERSISTENT_DATA_SYNC_FREQ`.
 2. It configures an rclone `persistent:` alias remote that points to `$PERSISTENT_DATA_HOME`.
 3. At startup it syncs each target from `persistent:` to `/opt/data`:
    - A trailing `/` means the target is a directory.
@@ -58,7 +58,7 @@ services:
     build: .
     environment:
       PERSISTENT_DATA_HOME: /opt/efs
-      PERSISTENT_TARGETS: "config.yaml,(state.db| 5m),logs/,(memories/| 10m)"
+      PERSISTENT_TARGETS_SYNC: "config.yaml,(state.db| 5m),logs/,(memories/| 10m)"
       ADDITIONAL_PROFILES: "work,home"
       PERSISTENT_DATA_SYNC_FREQ: 1h
     volumes:

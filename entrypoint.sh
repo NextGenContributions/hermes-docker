@@ -6,7 +6,7 @@
 #
 # Flow:
 #   1. Configure an rclone alias remote pointing to $PERSISTENT_DATA_HOME.
-#   2. Sync $PERSISTENT_TARGETS from remote -> /opt/data (and profiles).
+#   2. Sync $PERSISTENT_TARGETS_SYNC from remote -> /opt/data (and profiles).
 #   3. Hand over to the original Hermes entrypoint as PID 1.
 #   4. The s6-overlay persistent-sync service handles periodic local -> remote
 #      syncs and a final sync on container shutdown.
@@ -22,13 +22,13 @@ main() {
 
     # The sync wrapper is optional only when the required env vars are missing;
     # in that case fall through to the original entrypoint unchanged.
-    if [[ -z "${PERSISTENT_DATA_HOME:-}" || -z "${PERSISTENT_TARGETS:-}" ]]; then
-        log "PERSISTENT_DATA_HOME and/or PERSISTENT_TARGETS not set; running original entrypoint without sync"
+    if [[ -z "${PERSISTENT_DATA_HOME:-}" || -z "${PERSISTENT_TARGETS_SYNC:-}" ]]; then
+        log "PERSISTENT_DATA_HOME and/or PERSISTENT_TARGETS_SYNC not set; running original entrypoint without sync"
         exec "$ORIGINAL_ENTRYPOINT" "$@"
     fi
 
     log "PERSISTENT_DATA_HOME=$PERSISTENT_DATA_HOME"
-    log "PERSISTENT_TARGETS=$PERSISTENT_TARGETS"
+    log "PERSISTENT_TARGETS_SYNC=$PERSISTENT_TARGETS_SYNC"
     log "ADDITIONAL_PROFILES=${ADDITIONAL_PROFILES:-<none>}"
     log "PERSISTENT_DATA_SYNC_FREQ=${PERSISTENT_DATA_SYNC_FREQ:-3600}"
 
@@ -51,7 +51,7 @@ main() {
     # Parse targets with their per-target sync frequencies before syncing.
     local default_freq
     default_freq=$(parse_sync_interval "${PERSISTENT_DATA_SYNC_FREQ:-3600}")
-    load_targets "$PERSISTENT_TARGETS" "$default_freq"
+    load_targets "$PERSISTENT_TARGETS_SYNC" "$default_freq"
 
     # Copy persistent data from network storage to local disk before Hermes starts.
     sync_all_from_remote

@@ -17,7 +17,7 @@ do_setup() {
 
     local default_freq
     default_freq=$(parse_sync_interval "${PERSISTENT_DATA_SYNC_FREQ:-3600}")
-    load_targets "$PERSISTENT_TARGETS" "$default_freq"
+    load_targets "$PERSISTENT_TARGETS_SYNC" "$default_freq"
 }
 
 run_loop() {
