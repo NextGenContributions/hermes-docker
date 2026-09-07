@@ -1,3 +1,4 @@
 #!/command/with-contenv sh
 # s6 service finish: one final upload when the service (and container) stops.
-exec /usr/local/bin/persistent-sync.sh once
+# Triggers the final sync to remote.
+exec /usr/local/bin/persistent-sync.sh final

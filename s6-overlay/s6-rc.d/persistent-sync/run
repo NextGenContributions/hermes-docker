@@ -1,4 +1,8 @@
 #!/command/with-contenv sh
 # s6 service: periodically sync local persistent targets back to the remote
-# persistent volume. The finish script runs one final sync on shutdown.
+# persistent volume.
+
+# The loop mode performs setup itself, then runs the long-running loop.
+# SIGTERM will interrupt its wait/sleep and trigger an inline final sync
+# before the process exits.
 exec /usr/local/bin/persistent-sync.sh loop
