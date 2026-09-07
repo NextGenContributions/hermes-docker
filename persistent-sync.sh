@@ -32,7 +32,7 @@ run_loop() {
     local now
     now=$(date +%s)
     for target in "${TARGET_LIST[@]}"; do
-        next_sync["$target"]=$now
+        next_sync["$target"]=$((now + TARGET_FREQS["$target"]))
     done
 
     while true; do
