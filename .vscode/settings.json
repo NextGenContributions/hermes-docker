@@ -1,11 +1,13 @@
 {
     "cSpell.words": [
         "blogwatcher",
+        "contenv",
         "copyto",
         "dedupe",
         "firecrawl",
         "FREQS",
         "julientant",
+        "leafwiki",
         "lsjson",
         "markitdown",
         "metasearch",
@@ -13,7 +15,11 @@
         "PGID",
         "PUID",
         "pymupdf",
+        "rescan",
+        "rescans",
         "searxng",
+        "setuidgid",
+        "SIGUSR",
         "venv"
     ]
 }

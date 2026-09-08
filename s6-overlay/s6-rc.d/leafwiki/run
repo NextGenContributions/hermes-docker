@@ -1,0 +1,16 @@
+#!/command/with-contenv bash
+# s6 service: run the leafwiki background service.
+set -euo pipefail
+
+LOG_PREFIX="[leafwiki]"
+# shellcheck source=./persistent-sync-lib.sh
+source /usr/local/bin/persistent-sync-lib.sh
+
+# Leafwiki is only started when its data directory is explicitly configured.
+# s6-overlay still sees a healthy longrun exit and will not restart the service.
+if [[ -z "${LEAFWIKI_DATA_DIR:-}" ]]; then
+    log "LEAFWIKI_DATA_DIR is not set; leafwiki service disabled"
+    exec sleep infinity
+fi
+
+exec s6-setuidgid hermes /usr/local/bin/leafwiki

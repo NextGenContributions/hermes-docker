@@ -1,0 +1,29 @@
+#!/command/with-contenv bash
+# s6 service: periodically signal leafwiki to resync for new files.
+set -euo pipefail
+
+LOG_PREFIX="[leafwiki-resync]"
+# shellcheck source=./persistent-sync-lib.sh
+source /usr/local/bin/persistent-sync-lib.sh
+
+# Leafwiki resync is only active when its data directory is explicitly configured.
+if [[ -z "${LEAFWIKI_DATA_DIR:-}" ]]; then
+    log "LEAFWIKI_DATA_DIR is not set; leafwiki-resync service disabled"
+    exec sleep infinity
+fi
+
+resync_freq_seconds=$(parse_sync_interval "${LEAFWIKI_RESYNC_FREQ:-3600}")
+log "Signaling leafwiki to resync every ${resync_freq_seconds}s"
+
+# Exit cleanly on SIGTERM/SIGINT so s6-overlay service teardown is fast.
+trap 'log "Stopping leafwiki-resync"; exit 0' TERM INT
+
+while true; do
+    sleep "$resync_freq_seconds" &
+    wait $!
+    # Markdown files may still be changed outside LeafWiki.
+    # LeafWiki does not continuously watch the filesystem for these changes.
+    # Send SIGUSR1 or SIGHUP to the running process — no restart required to resync.
+    # https://github.com/perber/leafwiki#external-edits--resync
+    pkill -SIGHUP leafwiki 2>/dev/null || true
+done

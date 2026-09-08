@@ -1,0 +1,2 @@
+#!/command/with-contenv sh
+# s6 service finish: leafwiki-resync service has exited.

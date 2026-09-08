@@ -45,6 +45,17 @@ main() {
     # and chown data before the original Hermes entrypoint drops privileges.
     set_target_uid_gid
 
+    # Leafwiki is only enabled when its data directory is explicitly configured.
+    # When a persistent wiki home is also set, link leafwiki's root there so the
+    # wiki files are read/written directly on the persistent volume.
+    if [[ -n "${LEAFWIKI_DATA_DIR:-}" && -n "${PERSISTENT_WIKI_HOME:-}" ]]; then
+        log "LEAFWIKI_DATA_DIR=$LEAFWIKI_DATA_DIR"
+        log "PERSISTENT_WIKI_HOME=$PERSISTENT_WIKI_HOME"
+        log "Linking leafwiki root to persistent wiki home"
+        # Link them so leafwiki can read/write wiki directly on persistent volume
+        ensure_symlink "$PERSISTENT_WIKI_HOME" "$LEAFWIKI_DATA_DIR/root"
+    fi
+
     # Ensure both the remote mount point and the local Hermes data directory
     # exist and are writable by the runtime user.
     ensure_dir_owned "$PERSISTENT_DATA_HOME"
