@@ -1,8 +1,8 @@
 # v0.2.1
 FROM ghcr.io/julientant/blogwatcher-cli@sha256:e7a5d0cb2dcb94602ea89623236331219755bc4ff97ea4d3a9a7ae8a2ca7d36e AS blogwatcher-cli
 
-# v0.12.1
-FROM ghcr.io/perber/leafwiki@sha256:2e70745f69a43eb32a74d7962c1334c57ea56f2487fb3a1b8d4c0d0fa6185209 as leafwiki
+# v0.13.0
+FROM ghcr.io/perber/leafwiki@sha256:c40904dafd9db81ca2c9334e8c67fb168d175876111fc1fd9a00e3715b66775b as leafwiki
 
 # v2026.9.7
 FROM nousresearch/hermes-agent@sha256:63bfb6d732f49a55d453e801057273785cc61e0f6ee43db3fa2f2a79846301b7
