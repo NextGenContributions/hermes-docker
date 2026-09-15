@@ -32,7 +32,9 @@ RUN \
     pymupdf==1.28.0 \
     pymupdf4llm==1.28.0 \
     # https://hermes-agent.nousresearch.com/docs/user-guide/features/browser#firecrawl-cloud-mode
-    firecrawl-py==4.17.0
+    firecrawl-py==4.17.0 \
+    # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/media/media-youtube-content#setup
+    youtube-transcript-api==1.2.4
 
 # Monitor blogs and RSS/Atom feeds via blogwatcher-cli tool.
 # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/research/research-blogwatcher
