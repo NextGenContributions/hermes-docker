@@ -29,8 +29,8 @@ RUN \
     "markitdown[pptx,docx,xlsx,xls,pdf,audio-transcription,youtube-transcription]==0.1.6" \
     # Lightweight PDF and document processing
     # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-ocr-and-documents#pymupdf-lightweight
-    pymupdf==1.28.0 \
-    pymupdf4llm==1.28.0 \
+    pymupdf==1.28.2 \
+    pymupdf4llm==1.28.2 \
     # https://hermes-agent.nousresearch.com/docs/user-guide/features/browser#firecrawl-cloud-mode
     firecrawl-py==4.17.0 \
     # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/media/media-youtube-content#setup
