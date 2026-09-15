@@ -4,8 +4,8 @@ FROM ghcr.io/julientant/blogwatcher-cli@sha256:e7a5d0cb2dcb94602ea89623236331219
 # v0.13.0
 FROM ghcr.io/perber/leafwiki@sha256:c40904dafd9db81ca2c9334e8c67fb168d175876111fc1fd9a00e3715b66775b as leafwiki
 
-# v2026.9.7
-FROM nousresearch/hermes-agent@sha256:63bfb6d732f49a55d453e801057273785cc61e0f6ee43db3fa2f2a79846301b7
+# v2026.9.14
+FROM nousresearch/hermes-agent@sha256:99641e57ec762c59e54cb44aa6746b7fc68c18b3c5ddb088af54234c613d9294
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install -g \
