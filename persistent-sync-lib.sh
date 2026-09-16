@@ -25,6 +25,11 @@ TARGET_GID=""
 declare -a SYNC_TARGET_LIST
 declare -A SYNC_TARGET_FREQS
 
+# Parsed list of paths/patterns to exclude from directory sync targets.
+# Exclusions are interpreted relative to /opt/data and translated to be
+# target-relative for each directory sync operation. Populated by load_exclusions().
+declare -a EXCLUDE_TARGET_LIST
+
 # Allow callers to override the log prefix (entrypoint vs. s6 service).
 LOG_PREFIX="${LOG_PREFIX:-[persistent-sync]}"
 
@@ -195,6 +200,63 @@ load_sync_targets() {
     done
 }
 
+# Parse PERSISTENT_TARGETS_SYNC_EXCLUSIONS into EXCLUDE_TARGET_LIST.
+# Each entry is a path/pattern relative to /opt/data.
+load_exclusions() {
+    local targets="$1"
+
+    EXCLUDE_TARGET_LIST=()
+
+    [[ -z "$targets" ]] && return 0
+
+    local IFS=','
+    local raw_list
+    read -ra raw_list <<< "$targets"
+
+    for raw_target in "${raw_list[@]}"; do
+        local target
+        target=$(printf '%s' "$raw_target" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        [[ -z "$target" ]] && continue
+
+        EXCLUDE_TARGET_LIST+=("$target")
+        log "Configured sync exclusion '$target'"
+    done
+}
+
+# Compute exclusion patterns relative to a specific sync target.
+# Exclusions are interpreted as paths relative to /opt/data. For a directory
+# target, any exclusion that lies under that target is translated to a
+# target-relative pattern; patterns without a matching target prefix are
+# assumed to be relative to the target root (e.g. "*.tmp", "cache/").
+# File targets cannot be partially excluded, so this returns nothing for them.
+get_exclusions_for_target() {
+    local target="$1"
+    local is_dir=0
+    [[ "$target" == */ ]] && is_dir=1
+    local target_name="${target%/}"
+
+    [[ "$is_dir" -eq 1 ]] || return 0
+
+    local target_prefix="${target_name%/}/"
+
+    for exclude in "${EXCLUDE_TARGET_LIST[@]}"; do
+        # Strip a leading slash so absolute-style paths behave like /opt/data-relative.
+        local norm_exclude="${exclude#/}"
+
+        if [[ "$norm_exclude" == "${target_prefix%/}" || "$norm_exclude" == "$target_name" ]]; then
+            # The entire directory target is excluded.
+            printf '%s\n' "*"
+        elif [[ "$norm_exclude" == "$target_prefix"* ]]; then
+            # Strip the target prefix to make the pattern relative to the sync root.
+            local relative="${norm_exclude#"$target_prefix"}"
+            [[ -n "$relative" ]] && printf '%s\n' "$relative"
+        else
+            # Treat as a target-relative pattern.
+            printf '%s\n' "$norm_exclude"
+        fi
+    done
+}
+
 # Run rclone sync/copyto from src to dest. Skips when the source does not exist.
 # Avoids checksum/hash comparison because it is expensive over network storage.
 # Directory targets use 'sync'; file targets use 'copyto' so rclone treats the
@@ -203,6 +265,8 @@ rclone_run_sync() {
     local src="$1"
     local dest="$2"
     local is_dir="${3:-0}"
+    shift 3 || true
+    local -a exclude_patterns=("$@")
 
     log "Rclone sync: $src -> $dest (is_dir=$is_dir)"
     # Check that the source exists before asking rclone to sync it. This avoids
@@ -235,6 +299,13 @@ rclone_run_sync() {
         rclone_cmd+=(sync "$src" "$dest")
     else
         rclone_cmd+=(copyto "$src" "$dest")
+    fi
+
+    if [[ ${#exclude_patterns[@]} -gt 0 ]]; then
+        # log "Applying exclude patterns: ${exclude_patterns[*]}"
+        for pattern in "${exclude_patterns[@]}"; do
+            rclone_cmd+=(--exclude "$pattern")
+        done
     fi
 
     if "${rclone_cmd[@]}" \
@@ -320,9 +391,15 @@ sync_target() {
     local src="${src_base%/}/${target_name}"
     local dest="${dest_base%/}/${target_name}"
 
+    # Compute target-relative exclusion patterns for directory targets.
+    local -a exclude_patterns=()
+    if [[ "$is_dir" -eq 1 ]]; then
+        mapfile -t exclude_patterns < <(get_exclusions_for_target "$target")
+    fi
+
     # Sync the main target and make sure the runtime user owns both the target
     # and its parent directory on the destination side.
-    rclone_run_sync "$src" "$dest" "$is_dir"
+    rclone_run_sync "$src" "$dest" "$is_dir" "${exclude_patterns[@]}"
     chown_dest "$dest_base" "$target_name" "$is_dir"
     chown_dest_parent "$dest_base" "$target_name"
 

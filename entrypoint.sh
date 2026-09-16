@@ -37,6 +37,7 @@ main() {
 
     log "PERSISTENT_DATA_HOME=$PERSISTENT_DATA_HOME"
     log "PERSISTENT_TARGETS_SYNC=${PERSISTENT_TARGETS_SYNC:-<none>}"
+    log "PERSISTENT_TARGETS_SYNC_EXCLUSIONS=${PERSISTENT_TARGETS_SYNC_EXCLUSIONS:-<none>}"
     log "PERSISTENT_TARGETS_LINK=${PERSISTENT_TARGETS_LINK:-<none>}"
     log "ADDITIONAL_PROFILES=${ADDITIONAL_PROFILES:-<none>}"
     log "PERSISTENT_TARGETS_SYNC_FREQ=${PERSISTENT_TARGETS_SYNC_FREQ:-3600}"
@@ -83,6 +84,7 @@ main() {
 
     if [[ "$has_sync" -eq 1 ]]; then
         load_sync_targets "$PERSISTENT_TARGETS_SYNC" "$default_freq"
+        load_exclusions "${PERSISTENT_TARGETS_SYNC_EXCLUSIONS:-}"
     fi
 
     dedupe_sync_and_link_targets
