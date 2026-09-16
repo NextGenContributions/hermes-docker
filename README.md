@@ -21,7 +21,6 @@ This image ships [Leafwiki](https://github.com/perber/leafwiki) as optional supe
 - The `leafwiki` service runs `/usr/local/bin/leafwiki` as the `hermes` user.
 - The `leafwiki-resync` service sends `SIGHUP` to the running `leafwiki` process at the interval configured by `LEAFWIKI_RESYNC_FREQ`. Leafwiki uses this signal to rescan its data directory for Markdown files that were changed outside the wiki UI, so external edits are picked up without restarting the service.
 - `LEAFWIKI_DATA_DIR` sets the leafwiki data directory (for example `/opt/data/leafwiki`).
-- When `PERSISTENT_WIKI_HOME` is set, the entrypoint symlinks `$LEAFWIKI_DATA_DIR/root` to that directory so the wiki files live directly on the persistent volume instead of being synced by the background service.
 
 ## Persistent data and the custom entrypoint
 
@@ -41,7 +40,6 @@ To reduce that cost, this image uses [`rclone`](https://rclone.org/) inside a cu
 | `ADDITIONAL_PROFILES` | No | Comma-separated list of extra Hermes profile names. For each profile `<name>`, targets are also synced or symlinked between `$PERSISTENT_DATA_HOME/profiles/<name>` and `/opt/data/profiles/<name>`. |
 | `LEAFWIKI_DATA_DIR` | No | Path to the leafwiki data directory (for example `/opt/data/leafwiki`). When set, leafwiki and leafwiki-resync are started. When unset, both services stay disabled. |
 | `LEAFWIKI_RESYNC_FREQ` | No | Interval at which the `leafwiki-resync` service sends `SIGHUP` to leafwiki so it rescans for Markdown files changed outside the wiki UI. Plain seconds or a suffix of `s`, `m`, `h`, `d`. Defaults to `3600` (1 hour). |
-| `PERSISTENT_WIKI_HOME` | No | Directory on the persistent volume where leafwiki wiki files are stored. When set, the entrypoint symlinks `$LEAFWIKI_DATA_DIR/root` to this path so the wiki is read/written directly on the persistent volume and is not synced by the background service. |
 | `RCLONE_TRANSFERS` | No | Number of file transfers to run in parallel. Passed to rclone as `--transfers`. Defaults to `32`. |
 | `RCLONE_CHECKERS` | No | Number of checkers to run in parallel. Passed to rclone as `--checkers`. Defaults to `64`. |
 
