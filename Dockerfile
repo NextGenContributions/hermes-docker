@@ -13,10 +13,12 @@ RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install -g \
     # Local browser mode for the agent
     # https://hermes-agent.nousresearch.com/docs/user-guide/features/browser#local-browser-mode
-    agent-browser@0.31.1 \
+    agent-browser@">=0.31.1" \
     # Create and manipulate PowerPoint presentations
     # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-powerpoint#creating-from-scratch
-    pptxgenjs@4.0.1
+    pptxgenjs@">=4.0.1" \
+    # https://hermes-agent.nousresearch.com/docs/user-guide/security#tirith-pre-exec-security-scanning
+    tirith@">=0.4.2"
 
 RUN \
     # Remove the .python-version file to avoid mismatch with the Python version used in 
