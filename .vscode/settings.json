@@ -23,6 +23,7 @@
         "poppler",
         "pptxgenjs",
         "PUID",
+        "pydantic",
         "pymupdf",
         "pypdf",
         "reportlab",

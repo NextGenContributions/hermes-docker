@@ -46,7 +46,8 @@ RUN \
     # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-powerpoint#prerequisites
     python-pptx>=1.0.2 \
     # https://hermes-agent.nousresearch.com/docs/user-guide/features/browser#browser-use-mode-default
-    browser-use>=0.11.13
+    browser-use>=0.11.13 \
+    pydantic-settings>=2.14.2
 
 # Monitor blogs and RSS/Atom feeds via blogwatcher-cli tool.
 # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/research/research-blogwatcher
