@@ -28,17 +28,25 @@ RUN \
     # Install additional packages to the existing .venv
     uv add --no-cache --no-python-downloads \
     # General tools to extract text from various document formats
-    # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-powerpoint#dependencies
     # https://github.com/microsoft/markitdown#optional-dependencies
     "markitdown[pptx,docx,xlsx,xls,pdf,audio-transcription,youtube-transcription]==0.1.6" \
     # Lightweight PDF and document processing
-    # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-ocr-and-documents#pymupdf-lightweight
-    pymupdf==1.28.2 \
-    pymupdf4llm==1.28.2 \
+    # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-pdf
+    pdfplumber>=0.11.10 \
+    reportlab>=5.0.1 \
+    pypdf>=6.18.1 \
+    pymupdf>=1.28.2 \
+    pymupdf4llm>=1.28.2 \
     # https://hermes-agent.nousresearch.com/docs/user-guide/features/browser#firecrawl-cloud-mode
-    firecrawl-py==4.17.0 \
+    firecrawl-py>=4.17.0 \
     # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/media/media-youtube-content#setup
-    youtube-transcript-api==1.2.4
+    youtube-transcript-api>=1.2.4 \
+    # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-docx#prerequisites
+    python-docx>=1.2.0 \
+    # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/productivity/productivity-powerpoint#prerequisites
+    python-pptx>=1.0.2 \
+    # https://hermes-agent.nousresearch.com/docs/user-guide/features/browser#browser-use-mode-default
+    browser-use>=0.11.13
 
 # Monitor blogs and RSS/Atom feeds via blogwatcher-cli tool.
 # https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/research/research-blogwatcher
@@ -48,10 +56,28 @@ COPY --from=blogwatcher-cli /blogwatcher-cli /usr/local/bin/blogwatcher-cli
 # https://github.com/perber/leafwiki
 COPY --from=leafwiki /app/leafwiki /usr/local/bin/leafwiki
 
-# Install rclone for syncing important persistent data between the container's
-# fast local disk and the remote/network-backed persistent volume.
+# Set up GitHub CLI repository and keyring for installation.
+RUN mkdir -p -m 755 /etc/apt/keyrings \
+    && out=$(mktemp) && curl -fsSL -o$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    && cat $out | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && mkdir -p -m 755 /etc/apt/sources.list.d \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends rclone && \
+    apt-get install -y --no-install-recommends \
+    # GitHub CLI tool for interacting with GitHub from the command line.
+    gh \
+    # Vim text editor for editing files within the container.
+    vim \
+    # Install rclone for syncing important persistent data between the container's
+    # fast local disk and the remote/network-backed persistent volume.
+    rclone \
+    # LibreOffice core components without GUI for document processing.
+    libreoffice-core-nogui \
+    # Poppler utilities for PDF processing.
+    poppler-utils && \
+    # Clean up the apt cache to reduce the image size.
     rm -rf /var/lib/apt/lists/*
 
 # Wrap the original entrypoint to manage rclone sync before/after Hermes runs.
