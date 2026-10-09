@@ -4,10 +4,14 @@ FROM ghcr.io/julientant/blogwatcher-cli@sha256:e7a5d0cb2dcb94602ea89623236331219
 # v0.13.0
 FROM ghcr.io/perber/leafwiki@sha256:c40904dafd9db81ca2c9334e8c67fb168d175876111fc1fd9a00e3715b66775b as leafwiki
 
-# v2026.9.24
-FROM nousresearch/hermes-agent@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7
+# v0.21.6
+FROM nousresearch/hermes-agent@sha256:55e192fba0cd4fde61142abbff5adeacff40efdb482ccd0ff877924bd274f909
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Create symbolic links for uv and uvx binaries to make them easily accessible
+RUN ln -s /opt/hermes/tools/uv-*-linux-arm64/uv /usr/local/bin/uv && \
+    ln -s /opt/hermes/tools/uv-*-linux-arm64/uvx /usr/local/bin/uvx
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install -g \
