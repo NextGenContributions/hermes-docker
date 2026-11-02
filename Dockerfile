@@ -9,9 +9,19 @@ FROM nousresearch/hermes-agent@sha256:55e192fba0cd4fde61142abbff5adeacff40efdb48
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Create symbolic links for uv and uvx binaries to make them easily accessible
-RUN ln -s /opt/hermes/tools/uv-*-linux-arm64/uv /usr/local/bin/uv && \
-    ln -s /opt/hermes/tools/uv-*-linux-arm64/uvx /usr/local/bin/uvx
+# Create symbolic links for uv and uvx binaries to make them easily accessible.
+# The base image only ships the toolchain matching its own architecture
+# (uv-<version>-linux-x64 on amd64, uv-<version>-linux-arm64 on arm64), so the
+# suffix is derived from the BuildKit platform instead of being hardcoded.
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+        amd64) uv_suffix=x64 ;; \
+        arm64) uv_suffix=arm64 ;; \
+        *)     uv_suffix="$TARGETARCH" ;; \
+    esac && \
+    uv_dir="$(ls -d /opt/hermes/tools/uv-*-linux-"${uv_suffix}"/)" && \
+    ln -s "${uv_dir}uv" /usr/local/bin/uv && \
+    ln -s "${uv_dir}uvx" /usr/local/bin/uvx
 
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm install -g \

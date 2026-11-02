@@ -13,6 +13,28 @@ This custom image:
 
 Use this custom image when your Hermes setup requires the extra packages and runtime configuration that are not included in the upstream base image.
 
+## Published image (multi-arch)
+
+Every push to `main` builds the image for **`linux/amd64` and `linux/arm64`** on
+native GitHub runners and publishes a single multi-arch manifest list to GitHub
+Packages:
+
+```bash
+docker pull ghcr.io/nextgencontributions/hermes-docker:latest
+```
+
+The build logic lives in the shared reusable workflow
+[`docker-multiarch-template`](https://github.com/NextGenContributions/docker-multiarch-template):
+[`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) in this
+repository only supplies the inputs (platforms, tag rules, smoke test). Each
+platform is built and smoke-tested on its own architecture, then the manifest is
+assembled from the per-platform digests, so nothing is emulated and a broken
+architecture cannot take down the other.
+
+Build steps must therefore be architecture-agnostic: use BuildKit's
+`$TARGETARCH` instead of hardcoding a suffix (as the `uv` symlink setup does),
+and pin base images that publish both architectures.
+
 ## Leafwiki service
 
 This image ships [Leafwiki](https://github.com/perber/leafwiki) as optional supervised s6-overlay longrun services. Leafwiki provides a Markdown wiki editor/viewer that's compatible with the wiki that Hermes generates.
