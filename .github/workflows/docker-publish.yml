@@ -96,8 +96,14 @@ jobs:
         # Hermes itself must work without any root-time bootstrap.
         # Capture first: `grep -q` closes the pipe early, and with `pipefail`
         # that SIGPIPEs the producer and fails the step for the wrong reason.
-        docker run --rm "$IMAGE" --version > /tmp/nonroot-version.txt 2>&1 \
-          || { echo "::error::hermes --version failed in the nonroot image"; cat /tmp/nonroot-version.txt; exit 1; }
+        if ! docker run --rm "$IMAGE" --version > /tmp/nonroot-version.txt 2>&1; then
+          # Annotations are readable without repo admin rights, job logs are
+          # not, so put the actual failure into the annotation itself.
+          echo "::error title=nonroot-version-exit::$(tail -6 /tmp/nonroot-version.txt | tr '\n' '~' | cut -c1-800)"
+          echo "arch=$(uname -m) docker=$(docker version --format '{{.Server.Version}}') image=$IMAGE"
+          cat /tmp/nonroot-version.txt
+          exit 1
+        fi
         grep -q 'Hermes Agent v' /tmp/nonroot-version.txt \
           || { echo "::error::unexpected version output"; cat /tmp/nonroot-version.txt; exit 1; }
         # The dashboard must be able to come up on a loopback port.
