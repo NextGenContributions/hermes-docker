@@ -52,7 +52,8 @@ ensure_writable_dirs() {
 # publish the pinned Chromium path the same way the base image's stage2 does.
 export_browser_path() {
     local browser_bin
-    browser_bin="$(ls -d /opt/hermes/tools/chromium-*/chrome-linux64/chrome 2>/dev/null | head -n1 || true)"
+    # amd64 builds unpack to chrome-linux64/, arm64 builds to chrome-linux/.
+    browser_bin="$(ls -d /opt/hermes/tools/chromium-*/chrome-linux*/chrome 2>/dev/null | head -n1 || true)"
     if [[ -z "$browser_bin" ]]; then
         log "No pinned Chromium found under /opt/hermes/tools; leaving AGENT_BROWSER_EXECUTABLE_PATH unset"
     fi
