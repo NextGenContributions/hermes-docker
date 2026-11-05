@@ -94,8 +94,12 @@ jobs:
         uid="$(docker run --rm --entrypoint id "$IMAGE" -u)"
         [ "$uid" = "10000" ] || { echo "::error::nonroot image runs as uid $uid, expected 10000"; exit 1; }
         # Hermes itself must work without any root-time bootstrap.
-        docker run --rm "$IMAGE" --version | grep -q 'Hermes Agent v' \
-          || { echo "::error::hermes --version failed in the nonroot image"; exit 1; }
+        # Capture first: `grep -q` closes the pipe early, and with `pipefail`
+        # that SIGPIPEs the producer and fails the step for the wrong reason.
+        docker run --rm "$IMAGE" --version > /tmp/nonroot-version.txt 2>&1 \
+          || { echo "::error::hermes --version failed in the nonroot image"; cat /tmp/nonroot-version.txt; exit 1; }
+        grep -q 'Hermes Agent v' /tmp/nonroot-version.txt \
+          || { echo "::error::unexpected version output"; cat /tmp/nonroot-version.txt; exit 1; }
         # The dashboard must be able to come up on a loopback port.
         docker run --rm "$IMAGE" sh -c 'command -v hermes' >/dev/null \
           || { echo "::error::hermes is not on PATH in the nonroot image"; exit 1; }

@@ -65,6 +65,28 @@ bootstrap() {
     fi
 }
 
+# s6-overlay normally runs the dashboard as its own supervised slot whenever
+# HERMES_DASHBOARD is truthy, independently of the main command. Recreate that
+# here so `hermes gateway run` still serves the web UI.
+start_dashboard() {
+    case "${HERMES_DASHBOARD:-}" in
+        1|true|TRUE|True|yes|YES|Yes) ;;
+        *) return 0 ;;
+    esac
+    # If the main command IS the dashboard, main-wrapper will start it.
+    if [[ "${1:-}" == "dashboard" ]]; then
+        return 0
+    fi
+    local dash_host="${HERMES_DASHBOARD_HOST:-0.0.0.0}"
+    local dash_port="${HERMES_DASHBOARD_PORT:-9119}"
+    log "Starting dashboard on ${dash_host}:${dash_port} in the background"
+    (
+        cd "$HERMES_HOME" || exit 1
+        exec hermes dashboard --host "$dash_host" --port "$dash_port" \
+            --no-open --skip-build
+    ) &
+}
+
 # s6-overlay normally owns these; as non-root we start them ourselves and let
 # them die with the container/sandbox.
 start_background_services() {
@@ -96,6 +118,7 @@ main() {
     export_browser_path
     bootstrap
     start_background_services
+    start_dashboard "$@"
     log "Handing over to the Hermes main wrapper"
     exec /opt/hermes/docker/main-wrapper.sh "$@"
 }
