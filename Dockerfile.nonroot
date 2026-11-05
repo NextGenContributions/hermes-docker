@@ -40,7 +40,15 @@ RUN install -d -o hermes -g hermes -m 0700 /opt/data \
         /opt/data/profiles \
         /opt/data/cron \
  && install -d -o hermes -g hermes -m 0755 /opt/hermes/.cache \
+ && install -d -o hermes -g hermes -m 0755 /opt/hermes/work \
  && install -d -o hermes -g hermes -m 0755 /run/s6/container_environment
+
+# Make `hermes` resolvable for exec sessions that do not inherit the image ENV
+# (openshell sandbox exec, ssh, some runtimes' init) and for login shells.
+RUN ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes \
+ && printf '%s\n' 'export PATH=/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:$PATH' \
+      > /etc/profile.d/hermes-path.sh \
+ && chmod 0644 /etc/profile.d/hermes-path.sh
 
 COPY entrypoint.nonroot.sh /usr/local/bin/entrypoint.nonroot.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.nonroot.sh
@@ -56,7 +64,11 @@ ENV HOME=/opt/data \
     HERMES_NONROOT=1
 
 USER hermes
-WORKDIR /opt/data
+# The parent image declares VOLUME /opt/data, so /opt/data can never be the
+# workspace: runtimes that mount a workspace at the image WORKDIR (OpenShell)
+# reject a workdir masked by an image-declared volume. Use a writable directory
+# outside the volume instead; HERMES_HOME still points at /opt/data.
+WORKDIR /opt/hermes/work
 
 # No s6-overlay /init here: it needs root, and sandbox runtimes own PID 1
 # anyway. The entrypoint below does the bootstrap and execs the base image's
