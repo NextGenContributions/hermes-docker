@@ -19,6 +19,10 @@
 set -euo pipefail
 
 LOG_PREFIX="[entrypoint-nonroot]"
+# Under `set -e` a failed command substitution exits silently; make the line
+# number visible so a broken host (e.g. a base image without arm64 Chromium)
+# is diagnosable from the container log alone.
+trap 'rc=$?; log "ERROR: aborted at line $LINENO (exit $rc)"' ERR
 # shellcheck source=./persistent-sync-lib.sh
 source /usr/local/bin/persistent-sync-lib.sh
 
@@ -48,7 +52,10 @@ ensure_writable_dirs() {
 # publish the pinned Chromium path the same way the base image's stage2 does.
 export_browser_path() {
     local browser_bin
-    browser_bin="$(ls -d /opt/hermes/tools/chromium-*/chrome-linux64/chrome 2>/dev/null | head -n1)"
+    browser_bin="$(ls -d /opt/hermes/tools/chromium-*/chrome-linux64/chrome 2>/dev/null | head -n1 || true)"
+    if [[ -z "$browser_bin" ]]; then
+        log "No pinned Chromium found under /opt/hermes/tools; leaving AGENT_BROWSER_EXECUTABLE_PATH unset"
+    fi
     if [[ -n "$browser_bin" && -x "$browser_bin" ]]; then
         export AGENT_BROWSER_EXECUTABLE_PATH="$browser_bin"
         log "AGENT_BROWSER_EXECUTABLE_PATH=$AGENT_BROWSER_EXECUTABLE_PATH"
