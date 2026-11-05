@@ -19,7 +19,9 @@ on:
     paths:
       # Only rebuild when the image definition changes; docs-only commits skip it.
       - 'Dockerfile'
+      - 'Dockerfile.nonroot'
       - 'entrypoint.sh'
+      - 'entrypoint.nonroot.sh'
       - 'persistent-sync.sh'
       - 'persistent-sync-lib.sh'
       - 's6-overlay/**'
@@ -58,3 +60,42 @@ jobs:
         docker run --rm --entrypoint bash "$IMAGE" -c 'readlink -f /usr/local/bin/uv' \
           | grep -q -- "-linux-${uv_suffix}/uv$" \
           || { echo "::error::uv symlink does not point at the ${uv_suffix} toolchain"; exit 1; }
+
+  # Second flavor: the same tools and Hermes version, but running as the
+  # unprivileged `hermes` user (uid 10000) with no s6 /init. OpenShell and other
+  # hardened sandbox runtimes cannot start the root flavor because its bootstrap
+  # needs to chown the data volume and drop privileges itself.
+  #
+  # Published as `:<tag>-nonroot` (plus the undecorated `:nonroot` alias on the
+  # default branch) so both flavors stay addressable by the same version.
+  publish-nonroot:
+    needs: publish
+    uses: helloano420/docker-multiarch-template/.github/workflows/docker-publish.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      # Derived from the root flavor built by the job above, so the two cannot
+      # drift in tooling or Hermes version.
+      dockerfile: Dockerfile.nonroot
+      platforms: linux/amd64,linux/arm64
+      push: ${{ github.event_name != 'pull_request' }}
+      build-args: |
+        BASE_IMAGE=ghcr.io/helloano420/hermes-docker:latest
+      tags: |
+        type=raw,value=nonroot,enable={{is_default_branch}}
+        type=sha,format=short,prefix=sha-,suffix=-nonroot
+        type=semver,pattern={{version}},suffix=-nonroot
+        type=semver,pattern={{major}}.{{minor}},suffix=-nonroot
+      test-command: |
+        set -euo pipefail
+        # Must not be root: this flavor exists precisely because sandboxes run
+        # the workload unprivileged.
+        uid="$(docker run --rm --entrypoint id "$IMAGE" -u)"
+        [ "$uid" = "10000" ] || { echo "::error::nonroot image runs as uid $uid, expected 10000"; exit 1; }
+        # Hermes itself must work without any root-time bootstrap.
+        docker run --rm "$IMAGE" --version | grep -q 'Hermes Agent v' \
+          || { echo "::error::hermes --version failed in the nonroot image"; exit 1; }
+        # The dashboard must be able to come up on a loopback port.
+        docker run --rm "$IMAGE" sh -c 'command -v hermes' >/dev/null \
+          || { echo "::error::hermes is not on PATH in the nonroot image"; exit 1; }

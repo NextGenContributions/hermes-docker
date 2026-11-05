@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1
+#
+# Non-root flavor of the Hermes agent image.
+#
+# Why this exists: OpenShell (and most hardened runtimes) refuse to run the
+# workload as uid 0. The default image starts as root so s6-overlay can chown
+# the data volume and remap UIDs, then drops to `hermes` — that bootstrap is
+# impossible inside a sandbox that already runs unprivileged.
+#
+# This flavor derives from the published root image so the two stay in lockstep
+# (same tools, same Hermes version, same s6 service scripts) and only changes
+# the three things root is needed for:
+#   1. USER hermes (uid/gid 10000) from the very first instruction at runtime.
+#   2. Every writable path is created and owned at build time instead of boot.
+#   3. An entrypoint that does not chown, does not run /init as root, and
+#      starts the optional background services (persistent-sync, leafwiki)
+#      itself instead of through s6-overlay.
+#
+# Build (both architectures come from the same file):
+#   docker build -f Dockerfile.nonroot -t ghcr.io/helloano420/hermes-docker:nonroot .
+
+ARG BASE_IMAGE=ghcr.io/helloano420/hermes-docker:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+# Writable state the agent needs at runtime. Created here, owned by hermes, so
+# a non-root start never has to chown anything. Mirrors the paths the base
+# entrypoint and Hermes itself expect (HERMES_HOME=/opt/data, HOME=/opt/data).
+RUN install -d -o hermes -g hermes -m 0700 /opt/data \
+ && install -d -o hermes -g hermes -m 0755 \
+        /opt/data/.cache \
+        /opt/data/.config \
+        /opt/data/.local \
+        /opt/data/.local/share \
+        /opt/data/.local/state \
+        /opt/data/.runtime \
+        /opt/data/tmp \
+        /opt/data/logs \
+        /opt/data/profiles \
+        /opt/data/cron \
+ && install -d -o hermes -g hermes -m 0755 /opt/hermes/.cache \
+ && install -d -o hermes -g hermes -m 0755 /run/s6/container_environment
+
+COPY entrypoint.nonroot.sh /usr/local/bin/entrypoint.nonroot.sh
+RUN chmod 0755 /usr/local/bin/entrypoint.nonroot.sh
+
+ENV HOME=/opt/data \
+    HERMES_HOME=/opt/data \
+    XDG_CACHE_HOME=/opt/data/.cache \
+    XDG_CONFIG_HOME=/opt/data/.config \
+    XDG_DATA_HOME=/opt/data/.local/share \
+    XDG_STATE_HOME=/opt/data/.local/state \
+    XDG_RUNTIME_DIR=/opt/data/.runtime \
+    TMPDIR=/opt/data/tmp \
+    HERMES_NONROOT=1
+
+USER hermes
+WORKDIR /opt/data
+
+# No s6-overlay /init here: it needs root, and sandbox runtimes own PID 1
+# anyway. The entrypoint below does the bootstrap and execs the base image's
+# main-wrapper, which already knows how to route CMD -> hermes as non-root.
+ENTRYPOINT ["/usr/local/bin/entrypoint.nonroot.sh"]

@@ -35,6 +35,44 @@ Build steps must therefore be architecture-agnostic: use BuildKit's
 `$TARGETARCH` instead of hardcoding a suffix (as the `uv` symlink setup does),
 and pin base images that publish both architectures.
 
+## Non-root flavor (`Dockerfile.nonroot`)
+
+The default image starts as **root** so s6-overlay can chown the data volume,
+remap UIDs and then drop to `hermes`. Sandbox runtimes that hand the workload an
+unprivileged UID (OpenShell, `docker run --user`, Fly Machines) cannot perform
+that bootstrap, so this repository also publishes a non-root flavor built from
+[`Dockerfile.nonroot`](Dockerfile.nonroot):
+
+```bash
+docker pull ghcr.io/helloano420/hermes-docker:nonroot          # alias for the default branch
+docker pull ghcr.io/helloano420/hermes-docker:sha-abc1234-nonroot
+```
+
+It derives from the root image (same tools, same Hermes version) and changes
+only what root was needed for:
+
+- `USER hermes` (uid/gid `10000`) from the first instruction at runtime.
+- Every writable path (`/opt/data`, XDG cache/config/state/runtime, `/run/s6`)
+  is created and owned at **build** time instead of at boot.
+- [`entrypoint.nonroot.sh`](entrypoint.nonroot.sh) replaces the s6-overlay
+  dispatch: no `/init`, no chown, no privilege drop. It still runs the base
+  image's stage2 bootstrap (config seeding, bundled skills sync), exports
+  `AGENT_BROWSER_EXECUTABLE_PATH` itself, and starts the optional background
+  services (`persistent-sync`, `leafwiki` + its resync ticker) directly when
+  their env vars are set.
+- Hand-off goes to the base image's `main-wrapper.sh`, which already knows not
+  to `setuidgid` when the process is not root.
+
+Behaviour differences to be aware of:
+
+- No s6 supervision tree, so the gateway/dashboard are **not** restarted for
+  you — run one process per container (or let the sandbox runtime own it).
+- `docker run --user <arbitrary uid>` is still rejected by the base wrapper; the
+  baked `hermes` UID is the supported identity.
+- The dashboard refuses non-loopback binds without an auth provider, which is
+  why the sandbox runs it on `127.0.0.1` and publishes it through
+  `openshell forward` / a reverse proxy.
+
 ## Leafwiki service
 
 This image ships [Leafwiki](https://github.com/perber/leafwiki) as optional supervised s6-overlay longrun services. Leafwiki provides a Markdown wiki editor/viewer that's compatible with the wiki that Hermes generates.
