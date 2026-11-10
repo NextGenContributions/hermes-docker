@@ -183,3 +183,18 @@ In this example:
 - `memories/` is copied from the network disk to `/opt/data` as a directory at startup and synced back every 10 minutes. `memories/cache/*.tmp` is excluded from the `memories/` sync.
 - The same targets are also synced or linked for the `work` and `home` profiles under `/opt/data/profiles/work` and `/opt/data/profiles/home`.
 - All other Hermes read/write traffic uses the container's local disk.
+
+## OpenShell variant: `Dockerfile.nonroot-openshell`
+
+For running the image under OpenShell (credential-injecting sandbox proxy). Built on the nonroot image, adds two changes:
+
+- Copilot validator accepts OpenShell placeholders (`openshell:resolve:env:<KEY>`). Build fails if the upstream anchor changes.
+- Entrypoint re-syncs provider placeholders into `$HERMES_HOME/.env` before dashboard and gateway start.
+
+Entrypoint, Cmd, user, and workdir match the nonroot image.
+
+```bash
+docker build -f Dockerfile.nonroot-openshell -t ghcr.io/helloano420/hermes-docker:nonroot-openshell .
+```
+
+Check: `validate_copilot_token('openshell:resolve:env:X')` → `(True, 'OK')`; `validate_copilot_token('xyz_bad')` → `False`.

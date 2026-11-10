@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1
+#
+# OpenShell variant of the non-root Hermes image.
+#
+# Why this exists: the plain nonroot image is built for a generic runtime. Two
+# things break under OpenShell (sandbox runtime with a credential proxy):
+#   1. Copilot validation: upstream `validate_copilot_token()` only accepts
+#      gho_/github_pat_/ghu_ prefixes. OpenShell gives Hermes an opaque handle
+#      (openshell:resolve:env:<KEY>) that the proxy swaps for the real token on
+#      the wire. The handle has no prefix, so Hermes refuses it before any request.
+#   2. Stale placeholders: OpenShell mints new handles on every sandbox create,
+#      but /opt/data/.env (on a persistent volume) keeps the old text, and Hermes
+#      loads .env with override=True. The entrypoint re-syncs the handles from
+#      the environment before dashboard and gateway start.
+#
+# Build (from this repo, both architectures come from the same file):
+#   docker build -f Dockerfile.nonroot-openshell \
+#     -t ghcr.io/helloano420/hermes-docker:nonroot-openshell .
+#
+# Verify the patch in the built image:
+#   docker run --rm --entrypoint python3 <image> -c \
+#     "import sys; sys.path.insert(0,'/opt/hermes'); \
+#      from hermes_cli.copilot_auth import validate_copilot_token as v; \
+#      print(v('openshell:resolve:env:X'), v('xyz_bad')[0])"
+#   expected: (True, 'OK') False
+
+ARG BASE_IMAGE=ghcr.io/helloano420/hermes-docker:nonroot
+FROM ${BASE_IMAGE}
+
+USER root
+
+# Validator patch. Anchor-checked: if the upstream file changes, the build fails
+# instead of silently shipping an unpatched validator.
+RUN python3 - <<'PY'
+import pathlib
+p = pathlib.Path("/opt/hermes/hermes_cli/copilot_auth.py")
+src = p.read_text()
+anchor = "    if not token.startswith(_SUPPORTED_PREFIXES):"
+assert src.count(anchor) == 1, "copilot_auth.py changed upstream; re-check the OpenShell patch"
+branch = (
+    '    if token.startswith("openshell:resolve:env:"):\n'
+    '        return True, "OK"  # OpenShell placeholder; proxy swaps the real token\n'
+)
+p.with_name(p.name + ".orig").write_text(src)
+p.write_text(src.replace(anchor, branch + anchor))
+PY
+
+COPY entrypoint.nonroot-openshell.sh /usr/local/bin/entrypoint.nonroot.sh
+RUN chmod 0755 /usr/local/bin/entrypoint.nonroot.sh
+
+USER hermes
+WORKDIR /opt/hermes/work
+ENTRYPOINT ["/usr/local/bin/entrypoint.nonroot.sh"]
