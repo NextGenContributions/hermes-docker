@@ -120,44 +120,70 @@ start_background_services() {
     fi
 }
 
-# OpenShell: re-sync provider placeholders into $HERMES_HOME/.env before any service starts.
+# OpenShell: re-sync provider placeholders into env files before any service starts.
 # OpenShell mints new handles (openshell:resolve:env:<KEY>) per sandbox create. Hermes loads
 # .env with override=True, so stale handles there would beat the live environment.
+#
+# Targets:
+#   $HERMES_HOME/.env                       keys listed in PROVIDER_ENV_KEYS
+#   $HERMES_HOME/profiles/<name>/.env       every env var named PROFILE_<NAME>_<KEY>
+#                                           (name uppercased, '-' -> '_'), written as <KEY>
 PROVIDER_ENV_KEYS=""
 sync_env_placeholders() {
-    local envfile="${HERMES_HOME:-/opt/data}/.env"
-    if [[ ! -f "$envfile" ]]; then
-        echo "[entrypoint-nonroot] sync: $envfile missing; skipping" >&2
-        return 0
-    fi
-    python3 - "$envfile" $PROVIDER_ENV_KEYS <<'PY' || echo "[entrypoint-nonroot] Warning: placeholder sync failed" >&2
+    local home="${HERMES_HOME:-/opt/data}"
+    python3 - "$home" $PROVIDER_ENV_KEYS <<'PY' || echo "[entrypoint-nonroot] Warning: placeholder sync failed" >&2
 import os, re, sys
-path, keys = sys.argv[1], sys.argv[2:]
-out, done = [], set()
-for line in open(path).read().splitlines():
-    m = re.match(r"^#?\s*([A-Z0-9_]+)=", line)
-    if m and m.group(1) in keys:
-        k = m.group(1)
-        if k in done:
-            continue
-        done.add(k)
-        val = os.environ.get(k, "")
-        if val:
-            out.append(f"{k}={val}")
+
+home, main_keys = sys.argv[1], sys.argv[2:]
+
+
+def write_env(path, pairs, required):
+    """Set KEY=value for each pair. Keeps other lines; drops duplicate KEY lines."""
+    if not os.path.isfile(path):
+        print(f"[entrypoint-nonroot] sync: {path} missing; skipping", file=sys.stderr)
+        return
+    out, seen = [], set()
+    for line in open(path).read().splitlines():
+        m = re.match(r"^#?\s*([A-Z0-9_]+)=", line)
+        if m and m.group(1) in pairs:
+            k = m.group(1)
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(f"{k}={pairs[k]}")
         else:
-            print(f"[entrypoint-nonroot] sync: {k} not in environment; line left as-is", file=sys.stderr)
             out.append(line)
-    else:
-        out.append(line)
-for k in keys:
-    if k not in done and os.environ.get(k):
-        out.append(f"{k}={os.environ[k]}")
-        done.add(k)
-tmp = path + ".tmp"
-open(tmp, "w").write("\n".join(out) + "\n")
-os.chmod(tmp, 0o600)
-os.replace(tmp, path)
-print(f"[entrypoint-nonroot] sync: wrote {len(done)} provider keys to .env", file=sys.stderr)
+    for k, v in pairs.items():
+        if k not in seen:
+            out.append(f"{k}={v}")
+            seen.add(k)
+    for k in required:
+        if k not in pairs:
+            print(f"[entrypoint-nonroot] sync: {k} not in environment; line left as-is", file=sys.stderr)
+    tmp = path + ".tmp"
+    open(tmp, "w").write("\n".join(out) + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    print(f"[entrypoint-nonroot] sync: {path}: wrote {len(pairs)} key(s)", file=sys.stderr)
+
+
+# 1. Main profile: fixed key list from the provider set.
+main_pairs = {k: os.environ[k] for k in main_keys if os.environ.get(k)}
+write_env(os.path.join(home, ".env"), main_pairs, main_keys)
+
+# 2. Named profiles: PROFILE_<NAME>_<KEY> -> profiles/<name>/.env as <KEY>.
+profiles_dir = os.path.join(home, "profiles")
+if os.path.isdir(profiles_dir):
+    for name in sorted(os.listdir(profiles_dir)):
+        env_path = os.path.join(profiles_dir, name, ".env")
+        if not os.path.isfile(env_path):
+            continue
+        prefix = "PROFILE_" + name.upper().replace("-", "_") + "_"
+        pairs = {k[len(prefix):]: v for k, v in os.environ.items() if k.startswith(prefix) and v}
+        if not pairs:
+            print(f"[entrypoint-nonroot] sync: profile {name}: no {prefix}* variables", file=sys.stderr)
+            continue
+        write_env(env_path, pairs, [])
 PY
 }
 
