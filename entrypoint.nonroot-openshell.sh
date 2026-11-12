@@ -124,20 +124,24 @@ start_background_services() {
 # OpenShell mints new handles (openshell:resolve:env:<KEY>) per sandbox create. Hermes loads
 # .env with override=True, so stale handles there would beat the live environment.
 #
-# Targets:
-#   $HERMES_HOME/.env                       keys listed in PROVIDER_ENV_KEYS
-#   $HERMES_HOME/profiles/<name>/.env       every env var named PROFILE_<NAME>_<KEY>
-#                                           (name uppercased, '-' -> '_'), written as <KEY>
-PROVIDER_ENV_KEYS=""
+# Injected keys are discovered at runtime: every env var whose value is an OpenShell
+# placeholder. No key names are hard-coded here.
+#   <KEY>                   (no PROFILE_ prefix)  -> $HERMES_HOME/.env and every
+#                                                    $HERMES_HOME/profiles/<name>/.env
+#   PROFILE_<NAME>_<KEY>    -> profiles/<name>/.env only, as <KEY>, overriding the shared value
+#                              (NAME uppercased, '-' -> '_'; PROFILE_DEFAULT_* feeds the main .env)
 sync_env_placeholders() {
     local home="${HERMES_HOME:-/opt/data}"
-    python3 - "$home" $PROVIDER_ENV_KEYS <<'PY' || echo "[entrypoint-nonroot] Warning: placeholder sync failed" >&2
+    python3 - "$home" <<'PY' || echo "[entrypoint-nonroot] Warning: placeholder sync failed" >&2
 import os, re, sys
 
-home, main_keys = sys.argv[1], sys.argv[2:]
+home = sys.argv[1]
+PLACEHOLDER = "openshell:resolve:env:"
+injected = {k: v for k, v in os.environ.items() if v.startswith(PLACEHOLDER)}
+shared = {k: v for k, v in injected.items() if not k.startswith("PROFILE_")}
 
 
-def write_env(path, pairs, required):
+def write_env(path, pairs):
     """Set KEY=value for each pair. Keeps other lines; drops duplicate KEY lines."""
     if not os.path.isfile(path):
         print(f"[entrypoint-nonroot] sync: {path} missing; skipping", file=sys.stderr)
@@ -157,9 +161,6 @@ def write_env(path, pairs, required):
         if k not in seen:
             out.append(f"{k}={v}")
             seen.add(k)
-    for k in required:
-        if k not in pairs:
-            print(f"[entrypoint-nonroot] sync: {k} not in environment; line left as-is", file=sys.stderr)
     tmp = path + ".tmp"
     open(tmp, "w").write("\n".join(out) + "\n")
     os.chmod(tmp, 0o600)
@@ -167,23 +168,23 @@ def write_env(path, pairs, required):
     print(f"[entrypoint-nonroot] sync: {path}: wrote {len(pairs)} key(s)", file=sys.stderr)
 
 
-# 1. Main profile: fixed key list from the provider set.
-main_pairs = {k: os.environ[k] for k in main_keys if os.environ.get(k)}
-write_env(os.path.join(home, ".env"), main_pairs, main_keys)
+def own_pairs(name):
+    prefix = "PROFILE_" + name.upper().replace("-", "_") + "_"
+    return {k[len(prefix):]: v for k, v in injected.items() if k.startswith(prefix)}
 
-# 2. Named profiles: PROFILE_<NAME>_<KEY> -> profiles/<name>/.env as <KEY>.
+
+print(f"[entrypoint-nonroot] sync: {len(injected)} injected key(s) found", file=sys.stderr)
+
+# 1. Main profile: shared keys, then PROFILE_DEFAULT_* overrides.
+write_env(os.path.join(home, ".env"), {**shared, **own_pairs("default")})
+
+# 2. Every discovered profile: shared keys, then its own PROFILE_<NAME>_* overrides.
 profiles_dir = os.path.join(home, "profiles")
 if os.path.isdir(profiles_dir):
     for name in sorted(os.listdir(profiles_dir)):
         env_path = os.path.join(profiles_dir, name, ".env")
-        if not os.path.isfile(env_path):
-            continue
-        prefix = "PROFILE_" + name.upper().replace("-", "_") + "_"
-        pairs = {k[len(prefix):]: v for k, v in os.environ.items() if k.startswith(prefix) and v}
-        if not pairs:
-            print(f"[entrypoint-nonroot] sync: profile {name}: no {prefix}* variables", file=sys.stderr)
-            continue
-        write_env(env_path, pairs, [])
+        if os.path.isfile(env_path):
+            write_env(env_path, {**shared, **own_pairs(name)})
 PY
 }
 
