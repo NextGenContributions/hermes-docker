@@ -1,0 +1,147 @@
+name: docker-publish
+
+# Builds this image for linux/amd64 and linux/arm64 on native runners and
+# publishes the resulting manifest list to GitHub Packages (ghcr.io).
+#
+# The build logic lives in the shared reusable workflow, so tagging, caching,
+# SBOM/provenance and the platform assertions behave the same here as in every
+# other NextGenContributions project:
+#   https://github.com/NextGenContributions/docker-multiarch-template
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/docker-publish.yml'
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      # Only rebuild when the image definition changes; docs-only commits skip it.
+      - 'Dockerfile'
+      - 'Dockerfile.nonroot'
+      - 'Dockerfile.nonroot-openshell'
+      - 'entrypoint.sh'
+      - 'entrypoint.nonroot.sh'
+      - 'entrypoint.nonroot-openshell.sh'
+      - 'persistent-sync.sh'
+      - 'persistent-sync-lib.sh'
+      - 's6-overlay/**'
+      - '.github/workflows/docker-publish.yml'
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    uses: helloano420/docker-multiarch-template/.github/workflows/docker-publish.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      # Image name defaults to ghcr.io/<this repo>, i.e.
+      # ghcr.io/nextgencontributions/hermes-docker once this lands on main.
+      platforms: linux/amd64,linux/arm64
+      # Pull requests build and smoke-test both architectures without publishing.
+      push: ${{ github.event_name != 'pull_request' }}
+      test-command: |
+        set -euo pipefail
+        # Every tool the image is supposed to add must exist on every platform.
+        for tool in uv uvx gh rclone vim leafwiki blogwatcher-cli pdftotext soffice; do
+          docker run --rm --entrypoint bash "$IMAGE" -c "command -v $tool" >/dev/null \
+            || { echo "::error::$tool missing from the linux/${EXPECTED_ARCH} image"; exit 1; }
+        done
+        # uv must link to the toolchain bundled for THIS architecture: the base
+        # image ships uv-<ver>-linux-x64 on amd64 and ...-linux-arm64 on arm64.
+        case "$EXPECTED_ARCH" in
+          amd64) uv_suffix=x64 ;;
+          arm64) uv_suffix=arm64 ;;
+          *)     uv_suffix="$EXPECTED_ARCH" ;;
+        esac
+        docker run --rm --entrypoint bash "$IMAGE" -c 'readlink -f /usr/local/bin/uv' \
+          | grep -q -- "-linux-${uv_suffix}/uv$" \
+          || { echo "::error::uv symlink does not point at the ${uv_suffix} toolchain"; exit 1; }
+
+  # Second flavor: the same tools and Hermes version, but running as the
+  # unprivileged `hermes` user (uid 10000) with no s6 /init. OpenShell and other
+  # hardened sandbox runtimes cannot start the root flavor because its bootstrap
+  # needs to chown the data volume and drop privileges itself.
+  #
+  # Published as `:<tag>-nonroot` (plus the undecorated `:nonroot` alias on the
+  # default branch) so both flavors stay addressable by the same version.
+  publish-nonroot:
+    needs: publish
+    uses: helloano420/docker-multiarch-template/.github/workflows/docker-publish.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      # Derived from the root flavor built by the job above, so the two cannot
+      # drift in tooling or Hermes version.
+      dockerfile: Dockerfile.nonroot
+      platforms: linux/amd64,linux/arm64
+      push: ${{ github.event_name != 'pull_request' }}
+      build-args: |
+        BASE_IMAGE=ghcr.io/helloano420/hermes-docker:latest
+      tags: |
+        type=raw,value=nonroot,enable={{is_default_branch}}
+        type=sha,format=short,prefix=sha-,suffix=-nonroot
+        type=semver,pattern={{version}},suffix=-nonroot
+        type=semver,pattern={{major}}.{{minor}},suffix=-nonroot
+      test-command: |
+        set -euo pipefail
+        # Must not be root: this flavor exists precisely because sandboxes run
+        # the workload unprivileged.
+        uid="$(docker run --rm --entrypoint id "$IMAGE" -u)"
+        [ "$uid" = "10000" ] || { echo "::error::nonroot image runs as uid $uid, expected 10000"; exit 1; }
+        # Hermes itself must work without any root-time bootstrap.
+        # Capture first: `grep -q` closes the pipe early, and with `pipefail`
+        # that SIGPIPEs the producer and fails the step for the wrong reason.
+        if ! docker run --rm "$IMAGE" --version > /tmp/nonroot-version.txt 2>&1; then
+          # Annotations are readable without repo admin rights, job logs are
+          # not, so put the actual failure into the annotation itself.
+          echo "::error title=nonroot-version-exit::$(tail -6 /tmp/nonroot-version.txt | tr '\n' '~' | cut -c1-800)"
+          echo "arch=$(uname -m) docker=$(docker version --format '{{.Server.Version}}') image=$IMAGE"
+          cat /tmp/nonroot-version.txt
+          exit 1
+        fi
+        grep -q 'Hermes Agent v' /tmp/nonroot-version.txt \
+          || { echo "::error::unexpected version output"; cat /tmp/nonroot-version.txt; exit 1; }
+        # The dashboard must be able to come up on a loopback port.
+        docker run --rm "$IMAGE" sh -c 'command -v hermes' >/dev/null \
+          || { echo "::error::hermes is not on PATH in the nonroot image"; exit 1; }
+
+  # Third flavor: the nonroot image plus the OpenShell patches (Copilot handle
+  # validation and per-profile .env sync from PROFILE_<NAME>_* variables). Built
+  # from Dockerfile.nonroot-openshell, which derives from the nonroot base.
+  #
+  # Published as `:<tag>-nonroot-openshell` (plus `:nonroot-openshell` on the
+  # default branch).
+  publish-openshell:
+    needs: publish-nonroot
+    uses: helloano420/docker-multiarch-template/.github/workflows/docker-publish.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      dockerfile: Dockerfile.nonroot-openshell
+      platforms: linux/amd64,linux/arm64
+      push: ${{ github.event_name != 'pull_request' }}
+      build-args: |
+        BASE_IMAGE=ghcr.io/helloano420/hermes-docker:nonroot
+      tags: |
+        type=raw,value=nonroot-openshell,enable={{is_default_branch}}
+        type=sha,format=short,prefix=sha-,suffix=-nonroot-openshell
+        type=semver,pattern={{version}},suffix=-nonroot-openshell
+        type=semver,pattern={{major}}.{{minor}},suffix=-nonroot-openshell
+      test-command: |
+        set -euo pipefail
+        uid="$(docker run --rm --entrypoint id "$IMAGE" -u)"
+        [ "$uid" = "10000" ] || { echo "::error::openshell image runs as uid $uid, expected 10000"; exit 1; }
+        # The Copilot validator patch must be in place and the entrypoint must
+        # carry the profile sync.
+        docker run --rm --entrypoint sh "$IMAGE" -c 'grep -q "openshell:resolve:env:" /opt/hermes/hermes_cli/copilot_auth.py' \
+          || { echo "::error::Copilot validator patch missing"; exit 1; }
+        docker run --rm --entrypoint sh "$IMAGE" -c 'grep -q PROFILE_ /usr/local/bin/entrypoint.nonroot.sh' \
+          || { echo "::error::profile sync missing from entrypoint"; exit 1; }

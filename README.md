@@ -13,6 +13,66 @@ This custom image:
 
 Use this custom image when your Hermes setup requires the extra packages and runtime configuration that are not included in the upstream base image.
 
+## Published image (multi-arch)
+
+Every push to `main` builds the image for **`linux/amd64` and `linux/arm64`** on
+native GitHub runners and publishes a single multi-arch manifest list to GitHub
+Packages:
+
+```bash
+docker pull ghcr.io/nextgencontributions/hermes-docker:latest
+```
+
+The build logic lives in the shared reusable workflow
+[`docker-multiarch-template`](https://github.com/NextGenContributions/docker-multiarch-template):
+[`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml) in this
+repository only supplies the inputs (platforms, tag rules, smoke test). Each
+platform is built and smoke-tested on its own architecture, then the manifest is
+assembled from the per-platform digests, so nothing is emulated and a broken
+architecture cannot take down the other.
+
+Build steps must therefore be architecture-agnostic: use BuildKit's
+`$TARGETARCH` instead of hardcoding a suffix (as the `uv` symlink setup does),
+and pin base images that publish both architectures.
+
+## Non-root flavor (`Dockerfile.nonroot`)
+
+The default image starts as **root** so s6-overlay can chown the data volume,
+remap UIDs and then drop to `hermes`. Sandbox runtimes that hand the workload an
+unprivileged UID (OpenShell, `docker run --user`, Fly Machines) cannot perform
+that bootstrap, so this repository also publishes a non-root flavor built from
+[`Dockerfile.nonroot`](Dockerfile.nonroot):
+
+```bash
+docker pull ghcr.io/helloano420/hermes-docker:nonroot          # alias for the default branch
+docker pull ghcr.io/helloano420/hermes-docker:sha-abc1234-nonroot
+```
+
+It derives from the root image (same tools, same Hermes version) and changes
+only what root was needed for:
+
+- `USER hermes` (uid/gid `10000`) from the first instruction at runtime.
+- Every writable path (`/opt/data`, XDG cache/config/state/runtime, `/run/s6`)
+  is created and owned at **build** time instead of at boot.
+- [`entrypoint.nonroot.sh`](entrypoint.nonroot.sh) replaces the s6-overlay
+  dispatch: no `/init`, no chown, no privilege drop. It still runs the base
+  image's stage2 bootstrap (config seeding, bundled skills sync), exports
+  `AGENT_BROWSER_EXECUTABLE_PATH` itself, and starts the optional background
+  services (`persistent-sync`, `leafwiki` + its resync ticker) directly when
+  their env vars are set.
+- Hand-off goes to the base image's `main-wrapper.sh`, which already knows not
+  to `setuidgid` when the process is not root.
+
+Behaviour differences to be aware of:
+
+- No s6 supervision tree, so the gateway/dashboard are **not** restarted for
+  you — run one process per container (or let the sandbox runtime own it).
+- `docker run --user <arbitrary uid>` is still rejected by the base wrapper; the
+  baked `hermes` UID is the supported identity.
+- The dashboard refuses non-loopback binds without an auth provider, which is
+  why the sandbox runs it on `127.0.0.1` and publishes it through
+  `openshell forward` / a reverse proxy.
+
 ## Leafwiki service
 
 This image ships [Leafwiki](https://github.com/perber/leafwiki) as optional supervised s6-overlay longrun services. Leafwiki provides a Markdown wiki editor/viewer that's compatible with the wiki that Hermes generates.
@@ -123,3 +183,18 @@ In this example:
 - `memories/` is copied from the network disk to `/opt/data` as a directory at startup and synced back every 10 minutes. `memories/cache/*.tmp` is excluded from the `memories/` sync.
 - The same targets are also synced or linked for the `work` and `home` profiles under `/opt/data/profiles/work` and `/opt/data/profiles/home`.
 - All other Hermes read/write traffic uses the container's local disk.
+
+## OpenShell variant: `Dockerfile.nonroot-openshell`
+
+For running the image under OpenShell (credential-injecting sandbox proxy). Built on the nonroot image, adds two changes:
+
+- Copilot validator accepts OpenShell placeholders (`openshell:resolve:env:<KEY>`). Build fails if the upstream anchor changes.
+- Entrypoint re-syncs provider placeholders into `$HERMES_HOME/.env` before dashboard and gateway start.
+
+Entrypoint, Cmd, user, and workdir match the nonroot image.
+
+```bash
+docker build -f Dockerfile.nonroot-openshell -t ghcr.io/helloano420/hermes-docker:nonroot-openshell .
+```
+
+Check: `validate_copilot_token('openshell:resolve:env:X')` → `(True, 'OK')`; `validate_copilot_token('xyz_bad')` → `False`.
